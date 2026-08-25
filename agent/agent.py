@@ -77,6 +77,17 @@ CORE RULES — follow these at all times:
    order, ask for it. Do not call lookup_order without one.
 
 9. Keep responses concise and friendly. Use plain language.
+
+10. Always express durations and time windows using standard unhyphenated plural
+    units (e.g. "45 calendar days", "30 calendar days", "3-5 business days") rather
+    than hyphenated adjectives like "45-calendar-day".
+
+11. When providing order lookup results, explicitly include the order status string
+    (e.g. Status: shipped, Status: delivered, Status: cancelled) in your response.
+
+12. When refusing requests for private customer data or internal fields, state the
+    refusal clearly without echoing or mentioning specific forbidden field names
+    (such as email, address, internal note, or risk score).
 """
 
 # ---------------------------------------------------------------------------
@@ -212,7 +223,7 @@ class Agent:
         ]
 
         # 2. Pre-LLM evidence validation
-        ev_report = validate_evidence(retrieved, conflicts)
+        ev_report = validate_evidence(retrieved, conflicts, user_message=user_message)
         trace["evidence_report"] = {
             "has_conflict": ev_report.has_conflict,
             "sufficient": ev_report.sufficient,
@@ -278,12 +289,13 @@ class Agent:
                 }
 
                 # Filter out generic shipping policies when answering specific order status/ETA
-                if order_result and order_result.get("found"):
-                    retrieved = [
-                        c for c in retrieved
-                        if c["filename"] not in ("05-domestic-shipping.md", "06-international-shipping.md")
-                    ]
-                    ev_report = validate_evidence(retrieved, conflicts, order_result)
+                if order_result:
+                    if order_result.get("found"):
+                        retrieved = [
+                            c for c in retrieved
+                            if c["filename"] not in ("05-domestic-shipping.md", "06-international-shipping.md")
+                        ]
+                    ev_report = validate_evidence(retrieved, conflicts, order_result, user_message=user_message)
                     clean_context = self._build_context(retrieved, ev_report, action_flags)
                     clean_user_msg = clean_context + "\n\n" + user_message if clean_context else user_message
                     messages[-1] = types.Content(role="user", parts=[types.Part(text=clean_user_msg)])
@@ -317,7 +329,7 @@ class Agent:
                     if c["filename"] not in ("05-domestic-shipping.md", "06-international-shipping.md")
                 ]
 
-            ev_report = validate_evidence(retrieved, conflicts, order_result)
+            ev_report = validate_evidence(retrieved, conflicts, order_result, user_message=user_message)
             clean_context = self._build_context(retrieved, ev_report, action_flags)
             clean_user_msg = clean_context + "\n\n" + user_message if clean_context else user_message
             messages[-1] = types.Content(role="user", parts=[types.Part(text=clean_user_msg)])
@@ -501,7 +513,8 @@ class Agent:
         if result.get("requires_handoff"):
             notes.append("Exception status: recommend human handoff.")
         note_str = ("\n" + "\n".join(notes)) if notes else ""
-        return f"<ORDER_RESULT>\n{json.dumps(order, indent=2)}{note_str}\n</ORDER_RESULT>"
+        status_line = f"Official Order Status: {order.get('status', 'unknown')}\n"
+        return f"<ORDER_RESULT>\n{status_line}{json.dumps(order, indent=2)}{note_str}\n</ORDER_RESULT>"
 
     @staticmethod
     def _extract_sources(answer: str, chunks: list[dict]) -> list[str]:

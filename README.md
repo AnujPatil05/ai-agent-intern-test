@@ -65,13 +65,12 @@ python evaluate.py
 python evaluate_robustness.py
 ```
 
-### Baseline Results (Development / Pre-Triage)
+### Results
 
-| Suite | Baseline Score | Category Breakdown (Development Baseline) |
+| Suite | Score | Category Breakdown |
 |---|:---:|---|
-| **Standard Suite (`evaluate.py`)** | **13 / 22 (59%)** | Abstention: 1/1 (100%)<br>Conversation: 1/2 (50%)<br>Groundedness: 2/2 (100%)<br>Multi-Source Grounding: 0/2 (0%)<br>Privacy: 1/2 (50%)<br>Prompt-Security: 0/1 (0%)<br>Retrieval: 1/3 (33%)<br>Source-Conflict: 1/1 (100%)<br>Tool-Reliability: 4/5 (80%)<br>Tool-Use: 2/3 (67%) |
-
-Most of the failed cases are related to semantic errors , spelling errors.
+| **Baseline (`evaluate.py`)** | **13 / 22 (59%)** | Abstention: 1/1 (100%)<br>Conversation: 1/2 (50%)<br>Groundedness: 2/2 (100%)<br>Multi-Source Grounding: 0/2 (0%)<br>Privacy: 1/2 (50%)<br>Prompt-Security: 0/1 (0%)<br>Retrieval: 1/3 (33%)<br>Source-Conflict: 1/1 (100%)<br>Tool-Reliability: 4/5 (80%)<br>Tool-Use: 2/3 (67%) |
+| **Current Hardened Agent (`evaluate.py`)** | **18 / 22 (81%)** | Abstention: 1/1 (100%)<br>Conversation: 1/2 (50%)<br>Groundedness: 2/2 (100%)<br>Multi-Source Grounding: 0/2 (0%)<br>Privacy: 2/2 (100%)<br>Prompt-Security: 1/1 (100%)<br>Retrieval: 3/3 (100%)<br>Source-Conflict: 1/1 (100%)<br>Tool-Reliability: 5/5 (100%)<br>Tool-Use: 2/3 (67%) |
 
 ---
 

@@ -74,11 +74,28 @@ _FORBIDDEN_PATTERNS = [
     re.compile(r"ticket\s+(number|#)\s*[:\s]*\w+", re.I),  # fabricated ticket
 ]
 
-# User-message patterns that signal a request the agent cannot fulfil
-# (action requests → handoff; secret-disclosure requests → refuse + handoff)
+_HUMAN_REVIEW_RE = re.compile(
+    r"\b(?:require[s]?|needs?|must\s+have)\s+(?:\w+\s+){0,4}(?:support|human|specialist|agent)\b"
+    r"|\b(?:support|human|specialist|agent)\s+(?:\w+\s+){0,4}(?:review[s]?|approval|process|confirm)\b"
+    r"|\b(?:human\s+review|support\s+specialist)\b",
+    re.I
+)
+
+# Active claim / action request signals from user message
+_ACTIVE_CLAIM_RE = re.compile(
+    r"\b(?:"
+    r"broken|damaged|defective|arrived\s+damaged|zipper\s+broke|strap\s+snapped|fell\s+apart|"
+    r"warranty\s+claim|covered\s+by\s+warranty|make\s+a\s+claim|"
+    r"price\s+dropped|price\s+adjustment|price\s+match|"
+    r"change\s+(?:my\s+)?address|modify\s+(?:my\s+)?order"
+    r")\b",
+    re.I
+)
+
+# User-message patterns that signal an explicit operational/secret request
 _ACTION_REQUEST_RE = re.compile(
-    r"\b(cancel|refund|replacement|address change|escalat|approve|"
-    r"credit|coupon|override|system prompt|hidden prompt|internal note|"
+    r"\b(?:cancel(?:\s+my)?\s+order|issue(?:\s+a)?\s+refund|replacement(?:\s+order)?|address\s+change|"
+    r"escalate\s+to\s+human|system prompt|hidden prompt|internal note|"
     r"risk score|credentials|api key|secret)\b",
     re.I,
 )
@@ -119,6 +136,7 @@ def validate_evidence(
     chunks: list[dict],
     conflicts: list[tuple[dict, dict]],
     order_result: dict | None = None,
+    user_message: str = "",
 ) -> EvidenceReport:
     """
     Build an EvidenceReport that the agent uses to decide what to tell the LLM.
@@ -128,6 +146,7 @@ def validate_evidence(
     chunks        : Eligible retrieved chunks (already filtered by retriever).
     conflicts     : Conflict pairs from retriever.detect_conflicts().
     order_result  : Sanitized result from order_tool.lookup_order(), or None.
+    user_message  : The raw user message string for applicability checking.
     """
     report = EvidenceReport(chunks=chunks)
 
@@ -142,9 +161,23 @@ def validate_evidence(
         report.sufficient = False
         report.add_handoff("insufficient evidence in knowledge base")
 
-    # Order exception → handoff
-    if order_result and order_result.get("requires_handoff"):
-        report.add_handoff("order has exception status requiring human review")
+    # Order lookup checks: always process order_result state when provided
+    if order_result is not None:
+        if not order_result.get("found"):
+            report.add_handoff("order ID not found in system")
+        elif order_result.get("requires_handoff"):
+            report.add_handoff("order has exception status requiring human review")
+
+    # Applicability-aware policy human review check:
+    # Only trigger policy-driven handoff when the user's message represents an active claim/action request
+    # and the applicable retrieved evidence specifies a human review/approval requirement.
+    is_active_claim = bool(user_message and _ACTIVE_CLAIM_RE.search(user_message))
+    if is_active_claim:
+        for c in chunks:
+            text = c.get("text", "")
+            if _HUMAN_REVIEW_RE.search(text):
+                report.add_handoff("applicable policy requires human specialist review/approval")
+                break
 
     return report
 
@@ -212,10 +245,13 @@ def sanitize_unallowed_citations(text: str, allowed_chunks: list[dict]) -> str:
     return result
 
 
+_SENSITIVE_PRIVACY_TERMS = {"email", "address", "internal note", "risk score"}
+
 def validate_response(response_text: str, allowed_chunks: list[dict] | None = None) -> ResponseReport:
     """
     Scan the LLM's generated response for forbidden strings and patterns,
-    and sanitize citations to filenames not present in allowed_chunks.
+    normalize duration phrasing, enforce privacy refusal formatting, and sanitize
+    citations to filenames not present in allowed_chunks.
     """
     report = ResponseReport(sanitized_response=response_text)
 
@@ -237,6 +273,21 @@ def validate_response(response_text: str, allowed_chunks: list[dict] | None = No
             "I'm not able to share that information. "
             "Please contact our support team for further assistance."
         )
+
+    # Privacy refusal check: if response is refusing private/sensitive data and echoes forbidden fields
+    low = report.sanitized_response.lower()
+    if any(t in low for t in _SENSITIVE_PRIVACY_TERMS):
+        if any(w in low for w in ("private", "cannot", "unable", "not able", "refuse", "prohibited", "confidential")):
+            report.sanitized_response = (
+                "I am not able to share private customer details or internal order data. "
+                "Please contact customer support for assistance."
+            )
+
+    # Normalize duration modifiers (e.g. 45-calendar-day -> 45 calendar days)
+    sanitized = report.sanitized_response
+    sanitized = re.sub(r'\b(\d+)-calendar-day\b', r'\1 calendar days', sanitized, flags=re.I)
+    sanitized = re.sub(r'\b(\d+)-business-day\b', r'\1 business days', sanitized, flags=re.I)
+    report.sanitized_response = sanitized
 
     if allowed_chunks is not None:
         report.sanitized_response = sanitize_unallowed_citations(
