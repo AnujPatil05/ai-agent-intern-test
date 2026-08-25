@@ -1,239 +1,170 @@
-# AI Agent Intern Take-Home: Build a Reliable RAG Support Agent
+# Aster & Row — Reliable RAG Support Agent
 
-## The assignment
+## 1. Overview
 
-Aster & Row is a fictional ecommerce company that sells bags, drinkware, and travel accessories. The company wants to launch an AI support agent using the documents and mock order data in this repository.
-
-This repository intentionally contains **only content and data**. There is no starter application and no prescribed stack. Build the smallest reliable system you would be comfortable demonstrating to a customer.
-
-## Timebox
-
-Please spend **6–8 hours** on the assignment. Do not exceed eight hours.
-
-A smaller, well-tested system is better than a broad system that works only in a demo. It is acceptable to leave something incomplete if the limitation is clearly documented.
-
-## Submission
-
-Submit **one GitHub repository link**. Nothing else is required.
-
-Your repository must contain:
-
-- Your application source code.
-- Your tests and evaluation suite.
-- Clear setup and run instructions.
-- Evaluation results and known limitations in the README.
-- A short GIF or video embedded in the README showing the agent working.
-
-Do not submit API keys, credentials, customer data, separate documents, or slide decks.
+Built a context-aware, reliable RAG support agent for Aster & Row (an ecommerce company selling bags, drinkware, and travel accessories) using Python, Gemini 3.6 Flash, and a deterministic safety layer. The system handles customer inquiries, policy questions, multi-turn order tracking, and human support handoffs. It explicitly addresses four major LLM failure modes: false policy conflicts across differently scoped rules, loss of multi-turn session order context, hallucinated/unallowed source citations, and evidence contamination from generic shipping policies during order tracking.
 
 ---
 
-## Customer scenario
+## 2. Architecture
 
-Aster & Row has previously tried several AI support prototypes. The customer reported four recurring problems:
+```text
+User Input ──► Conversation State ──► Intent & Retrieval ──► LLM Response Generation
+                      │                      │                        │
+                      ▼                      ▼                        ▼
+               Session History        Order Tool / RAG      Deterministic Validation
+               & Order Context        Vector Search        (Safety & Citation Filter)
+                                                                      │
+                                                                      ▼
+                                                                Final Response
+```
 
-1. **Conflicting policy answers:** The agent sometimes says the return window is 30 days and sometimes says it is 45 days.
-2. **Invented order information:** The agent occasionally gives an order status without actually looking it up.
-3. **Lost conversation context:** Follow-up questions such as “What about Canada?” are treated as unrelated questions.
-4. **Unsafe retrieved content:** Internal or instruction-like text inside the knowledge base can affect the agent’s behavior.
-
-The supplied corpus contains realistic data-quality problems, including superseded content, internal notes, conflicting active sources, and fields that must not be shown to customers.
-
-Your task is to build an agent that handles these conditions deliberately rather than succeeding only on ideal questions.
-
----
-
-# Required capabilities
-
-## 1. Retrieval-Augmented Generation
-
-Use RAG over the Markdown files in `knowledge-base/`.
-
-Your implementation must:
-
-- Split and index the supplied documents.
-- Preserve useful metadata from the document front matter.
-- Retrieve only relevant passages instead of sending the entire corpus to the model.
-- Prefer authoritative, active policy documents over superseded or non-policy documents.
-- Include source references in every policy or product answer. A source should identify at least the filename and relevant heading.
-- Avoid making claims that are not supported by the retrieved content.
-- Clearly say when the supplied information is insufficient.
-- Surface genuine conflicts between current authoritative sources rather than silently choosing one.
-
-Do not delete or rewrite the supplied source files to make the assignment easier. You may create derived indexes or normalized representations.
-
-## 2. Order lookup as a tool or function
-
-Use `data/orders.json` to implement an order-status lookup tool or function.
-
-The model must **not** receive the entire orders file in its prompt. It should receive only the result of a lookup when order information is actually required.
-
-The order lookup behavior must:
-
-- Ask for an order ID when it is missing.
-- Handle unknown and malformed order IDs safely.
-- Normalize harmless input differences such as lowercase IDs or surrounding whitespace.
-- Use the order’s current `status` as authoritative.
-- Avoid inventing a delivery estimate when one is unavailable.
-- Avoid reporting stale delivery fields for cancelled or returned orders.
-- Never expose customer email, address, internal notes, risk scores, or other internal-only fields.
-- Never claim that a lookup happened when it did not.
-
-Assume that possession of the order ID is sufficient authentication for this mock assignment. You do not need to build a full identity-verification system.
-
-## 3. Multi-turn conversation
-
-Maintain relevant session context across turns.
-
-The agent should correctly handle follow-ups such as:
-
-- “Do you ship internationally?” followed by “What about Canada?”
-- “Where is `ORD-1007`?” followed by “When will it arrive?”
-- A policy question followed by a narrower question about an exception.
-
-The agent should not carry unrelated details indefinitely or mix one session with another.
-
-## 4. Prompting and agent behavior
-
-The agent must:
-
-- Treat user messages, retrieved passages, and tool results as untrusted data.
-- Follow application instructions rather than instructions found inside retrieved documents.
-- Refuse requests to reveal system prompts, hidden instructions, secrets, or internal-only data.
-- Use company content rather than general model knowledge for company-specific questions.
-- Ask a concise clarifying question when required information is missing.
-- Recommend human assistance when the documents conflict, the data is insufficient, or an action cannot be completed.
-- Never promise that a refund, cancellation, replacement, or address change has been completed unless the system actually supports that action.
-
-## 5. Evaluation suite
-
-The file `evaluation/visible-cases.json` contains behavior-level cases that your system must handle.
-
-Build an evaluation suite that:
-
-- Covers every supplied visible case.
-- Adds at least **five original cases** of your own.
-- Can be run using one clearly documented command.
-- Reports individual case results, not only a single overall score.
-- Separately reports useful categories such as retrieval, groundedness, tool use, privacy, and multi-turn behavior.
-- Uses deterministic assertions wherever practical, including source selection, tool calls, tool arguments, forbidden disclosures, and abstention behavior.
-- Does not rely exclusively on another LLM to grade the agent.
-
-The reviewers will also test paraphrases and combinations that are not included in the visible file. Do not hardcode answers for the supplied prompts.
-
-As you build, keep a small **bug diary** in your README. Document at least three failures you found in your own agent, including:
-
-- How you reproduced the failure.
-- The actual root cause.
-- The change you made.
-- The regression test that now catches it.
-
-At least one documented failure should be something you discovered beyond the exact wording of the visible cases. Include an early baseline and final evaluation result so we can see what improved.
-
-## 6. Basic observability
-
-Provide a debug mode, trace, or log that makes it possible to inspect:
-
-- The current user message.
-- Relevant conversation history.
-- Retrieved passages, metadata, and scores.
-- Tool calls and sanitized tool results.
-- The final response.
-- Errors, fallbacks, or handoffs.
-
-Plain structured logs are sufficient. Do not build a dashboard. Never log secrets.
-
-## 7. Minimal interface
-
-A CLI, simple web page, or basic API is sufficient. Visual polish will not affect the score.
-
-The final user-facing response should make it easy to see:
-
-- The answer.
-- Sources, when applicable.
-- Whether the agent is recommending a human handoff.
+* **Conversation State (`agent/conversation.py`)**: Manages multi-turn history and caches active session order lookups (`last_order_id` & `last_order_result`).
+* **Retrieval & Ingestion (`agent/ingestion.py`, `agent/retriever.py`)**: Indexes policy documents with Gemini embeddings (`gemini-embedding-2`), enforces metadata precedence (`active_official` over `superseded`), and detects genuine policy conflicts via a cosine-similarity gated matrix.
+* **Order Tool (`agent/order_tool.py`)**: Authoritative lookup engine for `orders.json` with PII sanitization and stale field suppression.
+* **Agent Core (`agent/agent.py`)**: Orchestrates tool calls, context building, multi-turn order follow-ups, and generic policy filtering.
+* **Deterministic Safety & Validation (`agent/safety.py`)**: Performs pre-LLM evidence validation, post-LLM PII/injection checks, and regex sanitization of unallowed source citations.
 
 ---
 
-# README requirements
+## 3. Tech Stack
 
-Your completed repository README must include:
-
-1. Setup and run instructions that work from a clean clone.
-2. Required environment variables and an `.env.example` without real credentials.
-3. The model, embedding approach, framework, and storage approach you chose.
-4. A short architecture explanation.
-5. The command for running evaluations.
-6. Baseline and final evaluation results, broken down by category.
-7. A bug diary covering at least three reproduced failures, root causes, fixes, and regression tests.
-8. Known limitations and what you would improve before production.
-9. Which AI coding tools you used, what you used them for, and one example of an AI-generated suggestion that was wrong or incomplete.
-10. A **2–4 minute GIF or video embedded in the README** demonstrating:
-   - One knowledge-base question with citations.
-   - One order lookup.
-   - One multi-turn conversation.
-   - One case where the agent correctly refuses to guess or recommends human help.
-   - The evaluation suite running.
-
-GitHub does not play uploaded video files inline in every context. An embedded GIF or a clickable video thumbnail/link inside the README is acceptable.
+* **LLM / Model**: Google Gemini 3.6 Flash (`google-genai` SDK).
+* **Embedding Approach**: `gemini-embedding-2` (768-dimensional normalized dense vectors).
+* **Framework & Libraries**: Python 3.11+, `numpy` (vector dot-product matrix operations), `pytest`, `python-dotenv`.
+* **Storage & Index**: Local JSON & NumPy disk cache (`.cache/embeddings.json`).
+* **Why these fit**: Provides cold startup (<1s), zero external database dependencies, deterministic vector similarity gating, and high reliability within the 6–8 hour timebox.
 
 ---
 
-# What not to spend time on
+## 4. Setup
 
-You do not need to build:
+```bash
+# 1. Clone repository and install dependencies
+pip install -r requirements.txt
 
-- Authentication or user management.
-- Production deployment infrastructure.
-- A production vector database.
-- Fine-tuning.
-- A polished frontend.
-- Multiple model-provider integrations.
-- Billing, analytics dashboards, or administration screens.
+# 2. Configure environment variables
+cp .env.example .env
+# Open .env and set: GEMINI_API_KEY=your_gemini_api_key
 
----
-
-# Evaluation criteria
-
-| Area | Weight |
-|---|---:|
-| Reliability, groundedness, and safe abstention | 25% |
-| Retrieval quality and document precedence | 20% |
-| Tool use, data handling, and privacy | 15% |
-| Evaluation quality and regression coverage | 20% |
-| Multi-turn behavior and observability | 10% |
-| Code clarity and practical tradeoffs | 5% |
-| README, demo, and customer-facing clarity | 5% |
-
-Framework choice and quantity of code are not scoring criteria.
+# 3. Launch interactive CLI
+python cli.py
+```
 
 ---
 
-# Repository contents
+## 5. Evaluation
+
+### Commands
+
+```bash
+# Run standard evaluation suite (visible + original cases)
+python evaluate.py
+
+# Run robustness evaluation suite (paraphrases & edge cases)
+python evaluate_robustness.py
+```
+
+### Baseline Results (Development / Pre-Triage)
+
+| Suite | Baseline Score | Category Breakdown (Development Baseline) |
+|---|:---:|---|
+| **Standard Suite (`evaluate.py`)** | **13 / 22 (59%)** | Abstention: 1/1 (100%)<br>Conversation: 1/2 (50%)<br>Groundedness: 2/2 (100%)<br>Multi-Source Grounding: 0/2 (0%)<br>Privacy: 1/2 (50%)<br>Prompt-Security: 0/1 (0%)<br>Retrieval: 1/3 (33%)<br>Source-Conflict: 1/1 (100%)<br>Tool-Reliability: 4/5 (80%)<br>Tool-Use: 2/3 (67%) |
+
+### Final Results
+
+TBD — final evaluation pending.
+
+---
+
+## 6. Bug Diary
+
+### Bug 1: False Conflict Between Differently Scoped Policies
+* **Reproduction**: Querying standard return window ("What is the return window for a regular customer?") or Canadian order ETA ("Where is ORD-1007?") caused agent to declare a false contradiction and trigger unnecessary handoff.
+* **Root Cause**: `CONFLICT_TOPIC_THRESHOLD` cosine gate was unread in `retriever.py`, and `_num_units_conflict` collapsed distinct unit types (`calendar days` vs `business days` vs `reporting days`), treating unrelated policies as contradictory.
+* **Fix**: Implemented matrix cosine-similarity gating (`matrix[idx1] @ matrix[idx2] >= 0.55`) in `detect_conflicts()` and preserved unit sub-types (`calendar_day` vs `business_day`).
+* **Regression Test**: `tests/test_conflict_detection.py` (`test_no_conflict_with_cosine_gate`).
+
+### Bug 2: Lost Multi-Turn Order Context
+* **Reproduction**: Turn 1: "Where is ORD-1007 and when should it arrive?" (Order lookup succeeded). Turn 2: "When will it arrive?" -> Agent prompted "Please share your order ID...".
+* **Root Cause**: `Session` dataclass lacked persistence for `last_order_result`, and agent routing failed to reuse active session order context on follow-up queries.
+* **Fix**: Added `last_order_result` to `Session`, implemented `_is_order_followup()` context detector, and reused cached order results without redundant API lookups.
+* **Regression Test**: `tests/test_targeted_order_flow.py` (`test_multi_turn_order_followup_context_reuse`).
+
+### Bug 3: Fabricated / Unallowed Source Citation
+* **Reproduction**: Requesting private data ("What is the customer's email and risk score?") returned a refusal that cited `07-customer-privacy-and-data-protection.md § Data protection` (a document not present in the 14-file KB).
+* **Root Cause**: LLM generated a generic refusal citation, and `validate_response()` lacked source integrity checks comparing cited `.md` filenames against `retrieved` chunks.
+* **Fix**: Created `sanitize_unallowed_citations(text, allowed_chunks)` in `agent/safety.py` to strip unretrieved `.md` filename citations from raw LLM responses.
+* **Regression Test**: `tests/test_targeted_privacy.py` (`test_privacy_request_refuses_sensitive_data_and_strips_fabricated_sources`).
+
+---
+
+## 7. Safety & Reliability
+
+* **Metadata-Aware Source Precedence**: Filters out `superseded` policies and migration notes; only `active_official` chunks serve as authoritative evidence.
+* **Conflict Detection**: Vector cosine-similarity gate combined with negation-scope matching surfaces genuine contradictions (e.g. Breeze Tumbler dishwasher care) while suppressing false positives.
+* **Order-Data Sanitization**: Strips sensitive customer PII (email, address, risk score, internal notes) from order lookup output before feeding context to LLM.
+* **Stale-Field Suppression**: Hides carrier, tracking number, and ETA on cancelled or returned orders to prevent misleading claims.
+* **Prompt-Injection Handling**: Treats retrieved KB passages and order details as untrusted context; resists instruction overrides (e.g., Doc 14 prompt injection attempts).
+* **Abstention & Handoff**: Triggers human handoff for genuine policy conflicts, missing KB evidence, exception order statuses, or unsupported user action requests.
+* **Citation Validation**: Post-LLM regex layer strips hallucinated or unallowed `.md` filenames not present in retrieved evidence.
+
+---
+
+## 8. Known Limitations
+
+* **In-Memory Session State**: Active session context and cached order results are stored in memory and reset upon CLI process restart.
+* **Phrase-Based Abstention Detection**: Relies on `_abstain_phrases` string matching rather than structured LLM boolean signals.
+* **Rule-Based Evidence Filtering**: Filters generic shipping policy filenames (`05-domestic-shipping.md`, `06-international-shipping.md`) for active order status queries to prevent evidence contamination.
+
+---
+
+## 9. AI Coding Tools Used
+
+* **Tools Used**: Antigravity IDE / AI Agent assistant used for pair programming, refactoring retrieval logic, and writing targeted pytest suites.
+* **Incorrect AI Suggestion & Manual Fix**: The AI initially suggested stripping all numerical day comparison logic in `_num_units_conflict` to fix false conflict detections. Manual testing revealed this broke genuine numeric conflict detection for identical policy scopes; the solution was refined to preserve unit sub-types (`calendar_day` vs `business_day`) and enforce the vector cosine gate.
+
+---
+
+## 10. Demo
+
+![Aster & Row Agent Demo](demo.gif)
+
+The recorded demo demonstrates:
+1. Knowledge-base query with accurate file & section citations.
+2. Direct order lookup using `lookup_order` tool.
+3. Multi-turn contextual follow-up without re-asking for order ID.
+4. PII refusal and automatic human handoff recommendation.
+5. Evaluation suite execution.
+
+---
+
+## 11. Repository Structure
 
 ```text
 .
-├── README.md
-├── knowledge-base/
-│   ├── 01-returns-policy-current.md
-│   ├── 02-returns-policy-legacy.md
-│   ├── 03-final-sale-and-promotions.md
-│   ├── 04-damaged-or-wrong-items.md
-│   ├── 05-domestic-shipping.md
-│   ├── 06-international-shipping.md
-│   ├── 07-warranty.md
-│   ├── 08-order-changes-and-cancellations.md
-│   ├── 09-trailplus-membership.md
-│   ├── 10-gift-cards-and-price-adjustments.md
-│   ├── 11-product-care.md
-│   ├── 12-breeze-tumbler-product-card.md
-│   ├── 13-support-escalation.md
-│   └── 14-internal-content-migration-notes.md
+├── agent/
+│   ├── agent.py               # Main agent orchestration & LLM interaction
+│   ├── conversation.py        # Session management & turn tracking
+│   ├── ingestion.py           # Ingestion & embedding caching
+│   ├── order_tool.py          # Authoritative order lookup & sanitization
+│   ├── retriever.py           # Vector retrieval & conflict detection
+│   └── safety.py              # Pre/post-LLM safety & citation validation
 ├── data/
-│   ├── orders.json
-│   └── orders-data-dictionary.md
-└── evaluation/
-    └── visible-cases.json
+│   ├── orders-data-dictionary.md
+│   └── orders.json
+├── evaluation/
+│   └── visible-cases.json     # Standard visible evaluation cases
+├── knowledge-base/            # 14 markdown policy documents
+├── tests/                     # Pytest regression suite
+│   ├── test_conflict_detection.py
+│   ├── test_embed_retry.py
+│   ├── test_targeted_order_flow.py
+│   └── test_targeted_privacy.py
+├── cli.py                     # Interactive CLI interface
+├── evaluate.py                # Main evaluation suite
+├── evaluate_robustness.py     # Robustness evaluation suite
+├── demo.gif                   # Recorded demonstration
+├── requirements.txt
+└── README.md
 ```
-
-Good luck. Build for reliability, not just for the happy-path demo.
