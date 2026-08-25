@@ -40,14 +40,14 @@ User Input ──► Conversation State ──► Intent & Retrieval ──► L
 ## 4. Setup
 
 ```bash
-# 1. Clone repository and install dependencies
+
 pip install -r requirements.txt
 
-# 2. Configure environment variables
-cp .env.example .env
-# Open .env and set: GEMINI_API_KEY=your_gemini_api_key
 
-# 3. Launch interactive CLI
+cp .env.example .env
+
+
+
 python cli.py
 ```
 
@@ -58,10 +58,10 @@ python cli.py
 ### Commands
 
 ```bash
-# Run standard evaluation suite (visible + original cases)
+
 python evaluate.py
 
-# Run robustness evaluation suite (paraphrases & edge cases)
+
 python evaluate_robustness.py
 ```
 
